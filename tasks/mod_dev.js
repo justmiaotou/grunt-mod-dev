@@ -13,6 +13,7 @@ var fs = require('fs'),
     path = require('path');
 
 module.exports = function(grunt) {
+    var _ = grunt.util._; // Lo-Dash
 
     grunt.registerMultiTask('mod_dev', 'Modular Development Support', function() {
 
@@ -68,7 +69,7 @@ module.exports = function(grunt) {
             }
         }
 
-        options.src = addSlash(options.src);
+        //options.src = addSlash(options.src);
         options.dest = addSlash(options.dest);
 
             // specify the snapshot file path
@@ -121,7 +122,7 @@ module.exports = function(grunt) {
             if (grunt.file.exists(snapshotPath)) {
                 snapshot = grunt.file.readJSON(snapshotPath);
 
-                grunt.file.recurse(options.src, function(abspath, rootdir, subdir, filename) {
+                fileRecurse(options.src, function(abspath, rootdir, subdir, filename) {
                     if (!isJS(abspath)) return;
 
                     var stat = fs.statSync(abspath);
@@ -146,7 +147,7 @@ module.exports = function(grunt) {
                     }
                 });
             } else {
-                grunt.file.recurse(options.src, function(abspath, rootdir, subdir, filename) {
+                fileRecurse(options.src, function(abspath, rootdir, subdir, filename) {
                     // 非JS文件不处理
                     if (!isJS(abspath)) return;
 
@@ -162,6 +163,32 @@ module.exports = function(grunt) {
             if (hasMod) {
                 // 将更新过的时间戳文件覆盖原文件
                 grunt.file.write(snapshotPath, JSON.stringify(snapshot));
+            }
+
+            function fileRecurse(src, callback) {
+                if (_.isArray(src)) {
+                    _.each(src, function(p) {
+                        srcHandler(p, callback);
+                    });
+                } else if (_.isString(src)) {
+                    srcHandler(src, callback);
+                }
+
+                function srcHandler(src, callback) {
+                    grunt.file.recurse(src, function(abspath, rootdir, subdir, filename) {
+                        var oriPath = unixifyPath(path.join(subdir, filename));
+
+                        if (options.files[oriPath]) {
+                            /**
+                             * 将files的文件路径替换为abspath使之与snapshot对象的路径一致
+                             */
+                            options.files[abspath] = options.files[oriPath];
+                            delete options.files[oriPath];
+                        }
+
+                        callback(abspath, rootdir, subdir, filename);
+                    });
+                }
             }
         })();
 
@@ -181,11 +208,11 @@ module.exports = function(grunt) {
                     require = getDepInSeq(module);
                 } else {
                     // 兼容非模块名而是路径的情况
-                    filePath = unixifyPath(path.join(options.src, module));
-                    if (filePath in snapshot) {
-                        require = getDepInSeq(filePath);
+                    //filePath = unixifyPath(path.join(options.src, module));
+                    if (module in snapshot) {
+                        require = getDepInSeq(module);
                     } else {
-                        grunt.log.error('[' + filePath + '] is not found!');
+                        grunt.log.error('[' + module + '] is not found!');
                         return;
                     }
                 }
