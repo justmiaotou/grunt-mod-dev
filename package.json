@@ -2,7 +2,7 @@
   "name": "grunt-mod-dev",
   "description": "modular development service",
   "version": "0.1.0",
-  "homepage": "",
+  "homepage": "https://github.com/justmiaotou",
   "author": {
     "name": "Memo Zhou",
     "email": "justmiaotou@gmail.com"
@@ -16,9 +16,6 @@
   "main": "Gruntfile.js",
   "engines": {
     "node": ">= 0.8.0"
-  },
-  "scripts": {
-    "test": "grunt test"
   },
   "devDependencies": {
     "grunt-contrib-jshint": "0.1.1rc6",
