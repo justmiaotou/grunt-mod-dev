@@ -53,10 +53,10 @@ module.exports = function(grunt) {
              * 而core这个task由于自定义了dest属性，所以它用的是自己的这个属性
              */
         var defaultOptions = {
-                charset: grunt.config('charset') || 'utf-8',
-                snapshotPath: grunt.config('snapshotPath') || './',
-                src: grunt.config('src') || './lib/',
-                dest: grunt.config('dest') || './build/'
+                charset: grunt.config('mod_dev.charset') || 'utf-8',
+                snapshotPath: grunt.config('mod_dev.snapshotPath') || './',
+                src: grunt.config('mod_dev.src') || './lib/',
+                dest: grunt.config('mod_dev.dest') || './build/'
             },
             options = this.data,
             _this = this;
@@ -174,15 +174,31 @@ module.exports = function(grunt) {
             var require,
                 source = '',
                 wrapperStart = grunt.file.read(path.resolve(__dirname, '../lib/wrapper-start.js'), 'utf-8'),
-                wrapperEnd = grunt.file.read(path.resolve(__dirname, '../lib/wrapper-end.js'), 'utf-8');
+                wrapperEnd = grunt.file.read(path.resolve(__dirname, '../lib/wrapper-end.js'), 'utf-8'),
+                filePath;
             for (var module in options.files) {
-                require = getDepInSeq(module);
+                if (module in modules) {
+                    require = getDepInSeq(module);
+                } else {
+                    // 兼容非模块名而是路径的情况
+                    filePath = unixifyPath(path.join(options.src, module));
+                    if (filePath in snapshot) {
+                        require = getDepInSeq(filePath);
+                    } else {
+                        grunt.log.error('[' + filePath + '] is not found!');
+                        return;
+                    }
+                }
                 for (var i = 0, l = require.length; i < l; ++i) {
-                    if (!modules[require[i]]) {
+                    if (modules[require[i]]) {
+                        filePath = modules[require[i]].path;
+                    } else if (snapshot[require[i]]) {
+                        filePath = require[i];
+                    } else {
                         grunt.log.error('[' + require[i] + '] is not found!');
                         return;
                     }
-                    source += wrapperStart + grunt.file.read(modules[require[i]].path, { encoding: options.charset}) + wrapperEnd;
+                    source += wrapperStart + grunt.file.read(filePath, { encoding: options.charset}) + wrapperEnd;
                 }
 
                 // 如果是core task，则与module.js合并使支持模块化
@@ -259,7 +275,8 @@ module.exports = function(grunt) {
          *  }
          */
         function getDepTree(mod, root, level) {
-            var module = modules[mod];
+            // mod也可能是文件路径，即获得该文件的依赖
+            var module = modules[mod] || snapshot[mod];
             if (!module) {
                 grunt.log.error('ERROR: module "' + mod + '" not found');
                 return;
@@ -295,6 +312,18 @@ module.exports = function(grunt) {
             }
             return str;
         }
+
+        // Normalize \\ paths to / paths.
+        function unixifyPath(filepath) {
+            // Windows?
+            var win32 = process.platform === 'win32';
+
+            if (win32) {
+                return filepath.replace(/\\/g, '/');
+            } else {
+                return filepath;
+            }
+        };
 
         function parseFileInfo(uri) {
             var content = grunt.file.read(uri, 'utf-8'),
