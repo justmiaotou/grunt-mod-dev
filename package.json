@@ -17,12 +17,14 @@
   "engines": {
     "node": ">= 0.8.0"
   },
+  "dependencies": {
+    "uglify-js": "~2.2.5"
+  },
   "devDependencies": {
     "grunt-contrib-jshint": "0.1.1rc6",
     "grunt-contrib-clean": "0.4.0rc6",
     "grunt-contrib-nodeunit": "0.1.2rc6",
-    "grunt": "0.4.0rc6",
-    "uglify-js": "~2.2.5"
+    "grunt": "0.4.0rc6"
   },
   "keywords": [
     "gruntplugin"

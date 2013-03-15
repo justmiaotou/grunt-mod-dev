@@ -69,7 +69,8 @@ module.exports = function(grunt) {
             }
         }
 
-        //options.src = addSlash(options.src);
+        // src及dest为源文件与目标文件的所在文件夹，而不是文件
+        options.src = addSlash(options.src);
         options.dest = addSlash(options.dest);
 
             // specify the snapshot file path
@@ -125,13 +126,14 @@ module.exports = function(grunt) {
                 fileRecurse(options.src, function(abspath, rootdir, subdir, filename) {
                     if (!isJS(abspath)) return;
 
-                    var stat = fs.statSync(abspath);
+                    var stat = fs.statSync(abspath),
+                        flagType;
                     // if the file is new or has been modified, update the info
                     if (!snapshot[abspath] || snapshot[abspath].mtime < stat.mtime) {
                         if (!snapshot[abspath]) {
-                            grunt.log.write('[New]\t');
+                            flagType = '[New]';
                         } else {
-                            grunt.log.write('[Modify]\t');
+                            flagType = '[Modify]';
                         }
 
                         // 记录哪些文件经过了修改
@@ -141,9 +143,9 @@ module.exports = function(grunt) {
                         // 修改过的文件需要更新时间戳信息
                         snapshot[abspath] = parseFileInfo(abspath);
 
-                        grunt.log.writeln(abspath);
-                        grunt.log.writeln('\tmodule:\t' + snapshot[abspath].modName);
-                        grunt.log.writeln('\trequire:\t[' + snapshot[abspath].require + ']');
+                        grunt.log.ok(flagType + '\t' + abspath);
+                        grunt.log.ok('\tmodule:\t' + snapshot[abspath].modName);
+                        grunt.log.ok('\trequire:\t[' + snapshot[abspath].require + ']');
                     }
                 });
             } else {
@@ -154,9 +156,11 @@ module.exports = function(grunt) {
                     hasMod = true;
                     snapshot[abspath] = parseFileInfo(abspath);
 
-                    grunt.log.writeln(abspath);
-                    grunt.log.writeln('\tmodule:\t' + snapshot[abspath].modName);
-                    grunt.log.writeln('\trequire:\t[' + snapshot[abspath].require + ']');
+                    modFiles[abspath] = 1;
+
+                    grunt.log.ok(abspath);
+                    grunt.log.ok('\tmodule:\t' + snapshot[abspath].modName);
+                    grunt.log.ok('\trequire:\t[' + snapshot[abspath].require + ']');
                 });
             }
 
@@ -164,6 +168,8 @@ module.exports = function(grunt) {
                 // 将更新过的时间戳文件覆盖原文件
                 grunt.file.write(snapshotPath, JSON.stringify(snapshot));
             }
+
+            grunt.log.debug(modFiles);
 
             function fileRecurse(src, callback) {
                 if (_.isArray(src)) {
@@ -197,25 +203,60 @@ module.exports = function(grunt) {
         build();
 
         function build() {
-            grunt.log.writeln('Start building...');
             var require,
                 source = '',
                 wrapperStart = grunt.file.read(path.resolve(__dirname, '../lib/wrapper-start.js'), 'utf-8'),
                 wrapperEnd = grunt.file.read(path.resolve(__dirname, '../lib/wrapper-end.js'), 'utf-8'),
-                filePath;
+                filePath,
+                hasModuleMod = false,
+                hasMod,
+                changeFiles = [];
+
+            grunt.log.ok('Start building...');
+
             for (var module in options.files) {
+                hasMod = false;
+                // 兼容非模块名而是路径的情况
                 if (module in modules) {
                     require = getDepInSeq(module);
+                } else if (module in snapshot) {
+                    require = getDepInSeq(module);
                 } else {
-                    // 兼容非模块名而是路径的情况
-                    //filePath = unixifyPath(path.join(options.src, module));
-                    if (module in snapshot) {
-                        require = getDepInSeq(module);
+                    grunt.log.error('[' + module + '] is not found!');
+                    return;
+                }
+
+                grunt.log.debug('require: [' + require + ']');
+
+                _.each(require, function(r) {
+                    if (r in modules) {
+                        if (modules[r].path in modFiles) {
+                            changeFiles.push(modules[r].path);
+                            hasMod = true;
+                        }
+                    } else if (r in snapshot) {
+                        if (r in modFiles) {
+                            changeFiles.push(r);
+                            hasMod = true;
+                        }
                     } else {
-                        grunt.log.error('[' + module + '] is not found!');
+                        grunt.log.error(module + '\'s dependency [' + r + '] is not found!');
                         return;
                     }
+                });
+
+                // 没有文件被修改过
+                if (!hasMod) {
+                    continue;
+                } else {
+                    grunt.log.writeln('');
+                    grunt.log.ok('Building Target ' + module + '...');
+
+                    grunt.log.ok(changeFiles + ' has been modified.');
                 }
+
+                hasModuleMod = true;
+
                 for (var i = 0, l = require.length; i < l; ++i) {
                     if (modules[require[i]]) {
                         filePath = modules[require[i]].path;
@@ -234,9 +275,17 @@ module.exports = function(grunt) {
                 }
 
                 grunt.file.write(path.resolve(options.dest, options.files[module]), source, { encoding: options.charset });
+
                 source = '';
+                changeFiles = [];
             }
-            grunt.log.writeln('Build Completing!');
+
+            grunt.log.writeln('');
+            if (!hasModuleMod) {
+                grunt.log.ok('No Target was Modified!');
+            } else {
+                grunt.log.ok('Build Complete!');
+            }
         }
 
         function prependModuleSupportFile(source) {
@@ -334,10 +383,21 @@ module.exports = function(grunt) {
         }
 
         function addSlash(str) {
-            if (str[str.length - 1] != '/') {
-                str += '/';
+            if (_.isArray(str)) {
+                _.each(str, function(s, i) {
+                    str[i] = sub(s);
+                });
+            } else if (_.isString(str)) {
+                str = sub(str);
             }
             return str;
+
+            function sub(str) {
+                if (str[str.length - 1] != '/') {
+                    str += '/';
+                }
+                return str;
+            }
         }
 
         // Normalize \\ paths to / paths.
