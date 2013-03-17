@@ -74,7 +74,8 @@ module.exports = function(grunt) {
         options.dest = addSlash(options.dest);
 
             // specify the snapshot file path
-        var snapshotPath = addSlash(options.snapshotPath) + '.snapshot',
+            // 每个task对应单独的snapshot文件，防止运行一个task后更新了snapshot文件影响另一个task对文件新旧的判断
+        var snapshotPath = addSlash(options.snapshotPath) + '.snapshot_' + this.target,
             /**
              * 各个文件的时间戳信息
              * 格式如下：
