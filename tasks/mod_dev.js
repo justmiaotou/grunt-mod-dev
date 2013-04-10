@@ -17,48 +17,14 @@ module.exports = function(grunt) {
 
     grunt.registerMultiTask('mod_dev', 'Modular Development Support', function() {
 
-        // charset, snapshotPath, src, dest作为公共参数，不作为task，因此这里直接返回不执行
-        // TODO 命令行中还是会打印出这些target的运行信息，想办法去掉？
-        if (this.target == 'charset' ||
-            this.target == 'snapshotPath' ||
-            this.target == 'src' ||
-            this.target == 'dest') {
-            return;
-        }
-
-            /**
-             * 若设置了公共参数，则将公共参数覆盖默认参数
-             * 即，若有如下配置：
-             * ```
-             * mod_dev: {
-             *      dest: './build/',
-             *      core: {
-             *          dest: './common/',
-             *          files: {
-             *              ...
-             *          }
-             *      },
-             *      project1: {
-             *          files: {
-             *              ...
-             *          }
-             *      },
-             *      project2: {
-             *          files: {
-             *              ...
-             *          }
-             *      }
-             * }
-             * ```
-             * 与core等task同级的dest属性不作为task而是公共参数，project1和project2将使用该参数
-             * 而core这个task由于自定义了dest属性，所以它用的是自己的这个属性
-             */
-        var defaultOptions = {
-                charset: grunt.config('mod_dev.charset') || 'utf-8',
-                snapshotPath: grunt.config('mod_dev.snapshotPath') || './',
-                src: grunt.config('mod_dev.src') || './lib/',
-                dest: grunt.config('mod_dev.dest') || './build/'
-            },
+        var defaultOptions = this.options({
+                charset: 'utf-8',
+                snapshotPath: './',
+                src: './lib/',
+                dest: './build/',
+                wrapCoreTarget: true,
+                wrapAll: false
+            }),
             options = this.data,
             _this = this;
 
@@ -271,7 +237,7 @@ module.exports = function(grunt) {
                 }
 
                 // 如果是core task，则与module.js合并使支持模块化
-                if (_this.target == 'core') {
+                if (options.wrapAll || (options.wrapCoreTarget && _this.target == 'core')) {
                     source = prependModuleSupportFile(source);
                 }
 
@@ -446,28 +412,3 @@ module.exports = function(grunt) {
     });
 
 };
-
-/**
- * Iterate all the files under the directory
- */
-function fileIterate(uri, cb) {
-    var stat = fs.statSync(uri),
-    files;
-
-    if (stat.isDirectory()) {
-        files = fs.readdirSync(uri);
-        files.forEach(function(item) {
-            var subUri = path.resolve(uri, item),
-            stat = fs.statSync(subUri);
-            if (stat.isFile()) {
-                cb && cb(stat, subUri);
-            } else if (stat.isDirectory()) {
-                // recurve the sub directory
-                fileIterate(subUri, cb);
-            }
-        });
-        fs.rmdirSync(uri);
-    } else if (stat.isFile()) {
-        cb && cb(stat, path.resolve(uri));
-    }
-}
