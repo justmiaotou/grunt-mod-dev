@@ -23,7 +23,8 @@ module.exports = function(grunt) {
                 src: './lib/',
                 dest: './build/',
                 wrapCoreTarget: true,
-                wrapAll: false
+                wrapAll: false,
+                exclude: null
             }),
             options = this.data,
             _this = this;
@@ -79,7 +80,55 @@ module.exports = function(grunt) {
             modules = {},
             // 保存修改过的文件的路径：{'path1': 1, 'path2': 1}
             // 用这种格式是为了方便索引，使用`path in modFiles`就可以判断
-            modFiles = {};
+            modFiles = {},
+            errFileNotFound = false;
+
+        // 统一将options.files中的文件路径格式化成abspath
+        (function() {
+            var mods;
+
+            for (var target in options.files) {
+                mods = options.files[target];
+                if (_.isArray(mods)) {
+                    for (var i = 0, l = mods.length; i < l; ++i) {
+                        mods[i] = formatPath(mods[i]);
+                    }
+                } else {
+                    options.files[target] = formatPath(mods);
+                }
+            }
+
+            function formatPath(mod) {
+                var result;
+                if (_.isArray(options.src)) {
+                    _.each(options.src, function(p) {
+                        if (grunt.file.exists(p, mod)) {
+                            if (result) {
+                                // 不同文件夹内有相同文件名则报错
+                                grunt.log.error('Duplicate file name: ' + result + ', ' + unixifyPath(path.join(p, mod)));
+                            } else {
+                                result = unixifyPath(path.join(p, mod));
+                            }
+                        }
+                    });
+                } else if (grunt.file.exists(options.src, mod)) {
+                    result = unixifyPath(path.join(options.src, mod));
+                }
+
+                if (!result) {
+                    grunt.log.error(mod + ' was not found!');
+                    errFileNotFound = true;
+                    return false;
+                }
+
+                return result;
+            }
+        })();
+
+        // 有文件找不到，中断任务
+        if (errFileNotFound) {
+            return;
+        }
 
         // 根据时间戳文件判断文件是否是新建的或是否修改过，并更新时间戳文件
         (function() {
@@ -149,16 +198,6 @@ module.exports = function(grunt) {
 
                 function srcHandler(src, callback) {
                     grunt.file.recurse(src, function(abspath, rootdir, subdir, filename) {
-                        var oriPath = unixifyPath(path.join(subdir, filename));
-
-                        if (options.files[oriPath]) {
-                            /**
-                             * 将files的文件路径替换为abspath使之与snapshot对象的路径一致
-                             */
-                            options.files[abspath] = options.files[oriPath];
-                            delete options.files[oriPath];
-                        }
-
                         callback(abspath, rootdir, subdir, filename);
                     });
                 }
@@ -167,7 +206,11 @@ module.exports = function(grunt) {
 
         modules = getModules();
 
-        build();
+        try {
+            build();
+        } catch(e) {
+            grunt.log.error(e);
+        }
 
         function build() {
             var require,
@@ -177,21 +220,16 @@ module.exports = function(grunt) {
                 filePath,
                 hasModuleMod = false,
                 hasMod,
-                changeFiles = [];
+                changeFiles = [],
+                module;
 
             grunt.log.ok('Start building...');
 
-            for (var module in options.files) {
+            for (var target in options.files) {
+                module = options.files[target];
                 hasMod = false;
-                // 兼容非模块名而是路径的情况
-                if (module in modules) {
-                    require = getDepInSeq(module);
-                } else if (module in snapshot) {
-                    require = getDepInSeq(module);
-                } else {
-                    grunt.log.error('[' + module + '] is not found!');
-                    return;
-                }
+
+                require = getAllDepInSeq(module);
 
                 grunt.log.debug('require: [' + require + ']');
 
@@ -217,7 +255,7 @@ module.exports = function(grunt) {
                     continue;
                 } else {
                     grunt.log.writeln('');
-                    grunt.log.ok('Building Target ' + module + '...');
+                    grunt.log.ok('Building Target ' + target + '...');
 
                     grunt.log.ok(changeFiles + ' has been modified.');
                 }
@@ -241,7 +279,7 @@ module.exports = function(grunt) {
                     source = prependModuleSupportFile(source);
                 }
 
-                grunt.file.write(path.resolve(options.dest, options.files[module]), source, { encoding: options.charset });
+                grunt.file.write(path.resolve(options.dest, target), source, { encoding: options.charset });
 
                 source = '';
                 changeFiles = [];
@@ -259,9 +297,10 @@ module.exports = function(grunt) {
             return grunt.file.read(path.resolve(__dirname, '../lib/module.js'), 'utf-8') + source;
         }
 
+        // 得到以模块名为键的对象
         function getModules() {
             var file,
-            modules = {};
+                modules = {};
             for (var path in snapshot) {
                 file = snapshot[path];
                 if (file.modName) {
@@ -277,14 +316,47 @@ module.exports = function(grunt) {
         }
 
         /**
-         * 获得模块依赖数组
+         * 按顺序合并多个文件的依赖
+         * 例如： mods = ['a', 'b']
+         * a的依赖是：['c', 'd', 'e']
+         * b的依赖是：['d', 'f']
+         * 则返回结果是：['c', 'd', 'e', 'a', 'f', 'b']
+         * 为避免b的依赖同时依赖a，a与b的依赖的交集以外部分在a之后，所以f在a之后
+         */
+        function getAllDepInSeq(mods) {
+            var result = [],
+                existDeps = {};
+            if (_.isArray(mods)) {
+                _.each(mods, function(mod) {
+                    var deps = getDepInSeq(mod);
+
+                    _.each(deps, function(dep) {
+                        if (!(dep in existDeps)) {
+                            existDeps[dep] = 1;
+
+                            result.push(dep);
+                        }
+                    });
+                });
+            } else if (_.isString(mods)) {
+                result = getDepInSeq(mods);
+            }
+            return result;
+        }
+
+        /**
+         * 获得单个模块的依赖数组
          * 优先级越高序号越小
          */
         function getDepInSeq(mod) {
+            if (!(mod in modules || mod in snapshot)) {
+                throw '[' + mod + '] is not found!';
+            }
+
             var depTree = getDepTree(mod),
-            arrSort = [],
-            level,
-            result = [];
+                arrSort = [],
+                level,
+                result = [];
             for (var i in depTree) {
                 level = depTree[i].level - 1;
                 arrSort[level] || (arrSort[level] = []);
@@ -327,7 +399,7 @@ module.exports = function(grunt) {
             root = root || {};
             level = level || 1;
             // 如果该模块之前已访问过，则视情况调整其level，并递归调整其之后的节点
-            // TODO 有循环引用引起死循环的bug
+            // TODO 似乎有循环引用引起死循环的可能
             if (root[mod] && root[mod].level < level) {
                 root[mod].level = level;
                 for (var i = 0, l = root[mod].require.length; i < l; ++i) {
@@ -377,25 +449,25 @@ module.exports = function(grunt) {
             } else {
                 return filepath;
             }
-        };
+        }
 
         function parseFileInfo(uri) {
             var content = grunt.file.read(uri, 'utf-8'),
-            modName = '',
-            require = [],
-            stat = fs.statSync(uri),
-            ast, walker;
+                modName = '',
+                require = [],
+                stat = fs.statSync(uri),
+                ast, walker;
 
             // get the Abstract Syntax Tree
             ast = UglifyJs.parse(content),
 
             walker = new UglifyJs.TreeWalker(function(node) {
-                // get the file's module name
+                // 得到文件的模块名
                 if (node instanceof UglifyJs.AST_Call && node.expression.name == 'define') {
                     modName = node.args[0].value;
                 }
-                // get the module's depandencies
-                if (node instanceof UglifyJs.AST_Call && node.expression.name == 'require') {
+                // 得到模块依赖。如果该依赖在exclude列表中，则忽略
+                if (node instanceof UglifyJs.AST_Call && node.expression.name == 'require' && !isInExcludeList(node.args[0].value)) {
                     require.push(node.args[0].value);
                 }
             });
@@ -407,6 +479,22 @@ module.exports = function(grunt) {
                 mtime: new Date(stat.mtime).getTime(),
                 require: require
             };
+        }
+
+        function isInExcludeList(mod) {
+            var list = options.exclude;
+            if (!list) return false;
+
+            if (_.isArray(list)) {
+                for (var i = 0, l = list.length; i < l; ++i) {
+                    if (list[i] === mod) {
+                        return true;
+                    }
+                }
+                return false;
+            } else {
+                return list === mod;
+            }
         }
 
     });

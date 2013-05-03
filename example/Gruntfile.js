@@ -25,7 +25,7 @@ module.exports = function(grunt) {
             },
             example: {
                 files: {
-                    // main-module : module-path
+                    // module-path : main-module
                     'main.js': 'main.js'
                 }
             }
